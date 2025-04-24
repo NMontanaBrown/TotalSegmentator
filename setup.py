@@ -33,7 +33,7 @@ setup(name='TotalSegmentator',
             'xvfbwrapper',
             'fury',
             'batchgenerators==0.21',
-            'nnunet @ git+https://github.com/NMontanaBrown/nnUNet_cust.git',
+            'nnunet @ git+https://github.com/NMontanaBrown/nnUNet_cust.git@load-weights-support#egg=nnunet',
             f'requests{requests_version}',
             'rt_utils'
         ],

@@ -35,7 +35,8 @@ setup(name='TotalSegmentator',
             'batchgenerators==0.21',
             'nnunet @ git+https://github.com/NMontanaBrown/nnUNet_cust.git@load-weights-support#egg=nnunet',
             f'requests{requests_version}',
-            'rt_utils'
+            'rt_utils',
+            'vtk==9.3.0'
         ],
         zip_safe=False,
         classifiers=[

@@ -12,8 +12,20 @@ import numpy as np
 import nibabel as nib
 
 from totalsegmentator.libs import get_config_dir
+import dicom2nifti
+import dicom2nifti.settings as settings
 
+def convert_dicom_to_nifti(dicom_dir:str, output_path:str):
+    settings.disable_validate_slicecount()
+    settings.disable_validate_slice_increment()
+    settings.disable_validate_orientation()
+    settings.disable_validate_orthogonal()
 
+    dicom2nifti.dicom_series_to_nifti(
+                dicom_dir,
+                output_path,
+                reorient_nifti=True,
+            )
 
 def command_exists(command):
     return shutil.which(command) is not None
@@ -52,47 +64,12 @@ def download_dcm2niix():
     os.remove(config_dir / "dcm2niibatch")
 
 
-def dcm_to_nifti(input_path, output_path, verbose=False):
+def dcm_to_nifti(input_path:str, output_path:str, verbose=False):
     """
     input_path: a directory of dicom slices
     output_path: a nifti file path
     """
-    verbose_str = "" if verbose else "> /dev/null"
-
-    config_dir = get_config_dir()
-
-    if command_exists("dcm2niix"):
-        dcm2niix = "dcm2niix"
-    else:
-        if platform.system() == "Windows":
-            dcm2niix = config_dir / "dcm2niix.exe"
-        else:
-            dcm2niix = config_dir / "dcm2niix"
-        if not dcm2niix.exists():
-            download_dcm2niix()
-
-    subprocess.call(f"{dcm2niix} -o {output_path.parent} -z y -f {output_path.name[:-7]} {input_path} {verbose_str}", shell=True)
-
-    nii_files = list(output_path.parent.glob("*.nii.gz"))
-
-    if len(nii_files) > 1:
-        print("WARNING: Dicom to nifti resulted in several nifti files. Skipping files which contain ROI in filename.")
-        for nii_file in nii_files:
-            # output file name is "converted_dcm.nii.gz" so if ROI in name, then this can be deleted
-            if "ROI" in nii_file.name:
-                os.remove(nii_file)
-                print(f"Skipped: {nii_file.name}")
-
-    nii_files = list(output_path.parent.glob("*.nii.gz"))
-
-    if len(nii_files) > 1:
-        print("WARNING: Dicom to nifti resulted in several nifti files. Only using first one.")
-        print([f.name for f in nii_files])
-        for nii_file in nii_files[1:]:
-            os.remove(nii_file)
-        # todo: have to rename first file to not contain any counter which is automatically added by dcm2niix
-
-    os.remove(str(output_path)[:-7] + ".json")
+    convert_dicom_to_nifti(input_path, output_path)
 
 
 def save_mask_as_rtstruct(img_data, selected_classes, dcm_reference_file, output_path):
@@ -110,10 +87,6 @@ def save_mask_as_rtstruct(img_data, selected_classes, dcm_reference_file, output
     for class_idx, class_name in tqdm(selected_classes.items()):
         binary_img = img_data == class_idx
         if binary_img.sum() > 0:  # only save none-empty images
-
-            # rotate nii to match DICOM orientation
-            binary_img = np.rot90(binary_img, 1, (0, 1))  # rotate segmentation in-plane
-
             # add segmentation to RT Struct
             rtstruct.add_roi(
                 mask=binary_img,  # has to be a binary numpy array

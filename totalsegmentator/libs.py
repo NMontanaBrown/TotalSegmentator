@@ -52,7 +52,7 @@ def get_config_dir():
 #             f.write(chunk)
 
 
-def download_url_and_unpack(url, config_dir):
+def download_url_and_unpack(url, config_dir, max_retries=5):
 
     # if "TOTALSEG_DISABLE_HTTP1" in os.environ and os.environ["TOTALSEG_DISABLE_HTTP1"]:
     #     print("Disabling HTTP/1.0")
@@ -65,28 +65,68 @@ def download_url_and_unpack(url, config_dir):
 
     tempfile = config_dir / "tmp_download_file.zip"
 
-    try:
-        st = time.time()
-        with open(tempfile, 'wb') as f:
-            # session = requests.Session()  # making it slower
-            with requests.get(url, stream=True) as r:
-                r.raise_for_status()
-                for chunk in r.iter_content(chunk_size=8192 * 16):
-                    # If you have chunk encoded response uncomment if
-                    # and set chunk_size parameter to None.
-                    # if chunk:
-                    f.write(chunk)
+    # Retry logic for handling transient errors
+    last_exception = None
+    for attempt in range(max_retries):
+        try:
+            st = time.time()
+            with open(tempfile, 'wb') as f:
+                with requests.get(url, stream=True) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_content(chunk_size=8192 * 16):
+                        # If you have chunk encoded response uncomment if
+                        # and set chunk_size parameter to None.
+                        # if chunk:
+                        f.write(chunk)
 
-        print("Download finished. Extracting...")
-        # call(['unzip', '-o', '-d', network_training_output_dir, tempfile])
-        with zipfile.ZipFile(config_dir / "tmp_download_file.zip", 'r') as zip_f:
-            zip_f.extractall(config_dir)
-        print(f"  downloaded in {time.time()-st:.2f}s")
-    except Exception as e:
-        raise e
-    finally:
-        if tempfile.exists():
-            os.remove(tempfile)
+            print("Download finished. Extracting...")
+            # call(['unzip', '-o', '-d', network_training_output_dir, tempfile])
+            with zipfile.ZipFile(config_dir / "tmp_download_file.zip", 'r') as zip_f:
+                zip_f.extractall(config_dir)
+            print(f"  downloaded in {time.time()-st:.2f}s")
+            return  # Success, exit function
+
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+
+            # Check if this is a retryable error
+            is_retryable = False
+            if hasattr(e, 'response') and e.response is not None:
+                status_code = e.response.status_code
+                # Retry on server errors and rate limiting
+                if status_code in [500, 502, 503, 504, 429]:
+                    is_retryable = True
+            else:
+                # Network errors (connection timeout, etc.) are also retryable
+                is_retryable = True
+
+            if is_retryable and attempt < max_retries - 1:
+                # Calculate backoff with jitter
+                backoff_time = (2 ** attempt) + random.uniform(0, 1)
+                print(f"Download failed (attempt {attempt + 1}/{max_retries}): {e}")
+                print(f"Retrying in {backoff_time:.1f} seconds...")
+                time.sleep(backoff_time)
+
+                # Clean up partial download before retry
+                if tempfile.exists():
+                    os.remove(tempfile)
+            else:
+                # Non-retryable error or final attempt
+                raise e
+
+        except Exception as e:
+            # Non-request exceptions (zip extraction errors, etc.) should not be retried
+            raise e
+        finally:
+            # Note: We only clean up on final failure or non-retryable error
+            # Successful extraction already completed, and retries clean up before next attempt
+            pass
+
+    # If we exhausted all retries, raise the last exception
+    if tempfile.exists():
+        os.remove(tempfile)
+    if last_exception:
+        raise last_exception
 
 
 def download_pretrained_weights(task_id):
